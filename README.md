@@ -180,6 +180,61 @@ show a real live edge. The scanner deliberately stops at "here is the trade I
 > (`tests/test_live_signal.py`). Confirm the JSON field mappings in
 > `live/polymarket.py` and `live/forecast.py` on the first networked run.
 
+## Paper trading, the engine, and the dashboard
+
+Beyond signalling, the repo includes a realistic **paper-execution simulator**,
+a **continuous backend engine**, and a **read-only trading dashboard**. These
+run end-to-end offline on a simulated market universe (live feeds are blocked
+in this build environment), producing real fill/P&L/slippage numbers.
+
+### Execution simulator (`weather_alpha.execsim`)
+
+Models what actually erodes a backtested edge:
+
+* fills walk the **order book level by level (VWAP)**, never at mid;
+* **300–1000 ms latency** between signal and arrival, during which the book
+  moves — so latency causes genuine adverse slippage, not a free fill;
+* **FOK** (fill-or-kill) and **FAK** (fill-and-kill / IOC), partial fills, and
+  cancel-on-insufficient-liquidity;
+* **per-market dynamic fee** rates;
+* exits matched against the **real bid side**, level by level;
+* settlement to the binary outcome, with **net P&L, slippage, and unfilled
+  rate** accounting.
+
+### Engine (`weather_alpha.engine`)
+
+The continuous backend: each `tick()` scans the whole universe, evaluates the
+four-condition signal, **sizes each bet into the (10, 30) USDC band**
+(edge-shaped, fractional-Kelly nudged, hard-clamped), routes it to the paper
+broker, and settles resolved markets. It publishes a state snapshot; all
+discovery/betting logic stays server-side.
+
+Sanity check over a large simulated universe (400 markets, real fees+latency):
+~300 trades, net P&L clearly positive after costs — i.e. when an edge exists,
+the plumbing turns it into money. (The ROI in the sim is inflated by a large
+injected mispricing; it validates the machinery, it is not a return forecast.)
+
+### Dashboard (`weather_alpha.dashboard`)
+
+```bash
+python -m weather_alpha.dashboard --port 8787 --markets 60 --interval 0.5
+# open http://127.0.0.1:8787
+```
+
+A self-contained (no-CDN) trading terminal that polls `/api/state`: equity +
+P&L + fees + unrealized KPIs, an equity-curve sparkline, open positions
+(shares/avg/mark/uPnL/hours-to-settle), recent fills (status/size/avg
+price/slippage/latency/unfilled), settlements, and the live signal scan. It is
+**pure display** — the engine in the background thread owns all logic.
+
+### Execution is simulated only — NOT wired to real money
+
+There is deliberately **no order placement, wallet, or signing**. Going from
+this paper broker to real fills means adding key custody, real CLOB order
+submission, and correlation-aware portfolio risk — the part that can actually
+lose money and leak keys. Build it only after live, logged signals show a real
+edge.
+
 ## Honest caveats — read before trusting any number
 
 * **Settlement source ≠ ERA5.** Real contracts settle on a specific official
@@ -214,9 +269,25 @@ weather_alpha/
     polymarket.py   live Gamma + CLOB client (verify field shapes on first run)
     scanner.py      one live pass + JSONL track-record logging
     cli.py          `python -m weather_alpha.live`
+  execsim/        realistic paper-trading execution
+    book.py         order book + level-by-level VWAP fill walk
+    orders.py       Order/Fill/Position, FOK & FAK
+    fees.py         per-market dynamic fee rate
+    latency.py      300-1000 ms signal->order delay
+    feed.py         book feed that evolves during latency (real slippage)
+    broker.py       PaperBroker: delay->fill->partial/cancel->settle->stats
+  engine/         continuous backend (discovery + betting, server-side)
+    sizing.py       bet size clamped to (10, 30) USDC
+    simfeed.py      offline simulated market universe
+    engine.py       scan -> signal -> size -> route -> settle + snapshot
+  dashboard/      read-only trading interface
+    server.py       stdlib HTTP, /api/state + index.html (engine in a thread)
+    index.html      self-contained trading terminal (no CDN)
 tests/
   test_framework.py    backtest correctness (no network, no pytest)
-  test_live_signal.py  live decision-logic correctness (no network, no pytest)
+  test_live_signal.py  live decision-logic correctness
+  test_execsim.py      execution simulator correctness
+  test_engine.py       engine + sizing correctness
 examples/
   run_demo.sh
   cities.json

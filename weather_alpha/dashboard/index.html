@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>weather_alpha · trading</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121722; --panel2:#0f141d; --line:#1e2633;
+    --txt:#d6deeb; --dim:#7b8794; --grn:#3fd07f; --red:#ff5d6c; --acc:#4aa3ff;
+    --warn:#ffb454;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{display:flex;align-items:baseline;gap:18px;padding:12px 18px;
+    border-bottom:1px solid var(--line);background:var(--panel2)}
+  header h1{font-size:15px;margin:0;letter-spacing:.5px}
+  header .tag{color:var(--dim)}
+  header .clock{margin-left:auto;color:var(--dim)}
+  .wrap{padding:16px 18px;display:grid;gap:16px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+  .card .label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .card .val{font-size:22px;margin-top:6px;font-weight:600}
+  .card .sub{color:var(--dim);font-size:11px;margin-top:3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:880px){.grid2{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .panel h2{margin:0;padding:10px 14px;font-size:12px;letter-spacing:.6px;
+    text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 14px;text-align:right;white-space:nowrap}
+  th{color:var(--dim);font-weight:500;font-size:11px;border-bottom:1px solid var(--line)}
+  td:first-child,th:first-child{text-align:left}
+  tbody tr:nth-child(even){background:#0e131c}
+  .pos{color:var(--grn)} .neg{color:var(--red)} .dim{color:var(--dim)}
+  .pill{padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid var(--line)}
+  .pill.yes{color:var(--grn);border-color:#234} .pill.no{color:var(--warn);border-color:#332}
+  .pill.trade{color:#0b0e14;background:var(--acc);border-color:var(--acc)}
+  .spark{width:100%;height:60px;display:block}
+  .empty{padding:14px;color:var(--dim)}
+  .flash{animation:fl .6s}@keyframes fl{from{background:#16324a}to{background:transparent}}
+</style>
+</head>
+<body>
+<header>
+  <h1>weather_alpha</h1>
+  <span class="tag">paper-trading engine · simulated universe</span>
+  <span class="clock"><span id="now">—</span> · tick <span id="tick">0</span></span>
+</header>
+
+<div class="wrap">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="panel">
+    <h2>Equity curve <span id="roi" class="dim"></span></h2>
+    <svg class="spark" id="spark" viewBox="0 0 600 60" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Open positions <span id="nopos" class="dim"></span></h2>
+      <table><thead><tr><th>market</th><th>side</th><th>shares</th><th>avg</th>
+        <th>mark</th><th>uPnL</th><th>h→settle</th></tr></thead>
+        <tbody id="positions"></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>Recent fills</h2>
+      <table><thead><tr><th>market</th><th>side</th><th>status</th><th>size</th>
+        <th>avg px</th><th>slip/sh</th><th>lat ms</th><th>unfill</th></tr></thead>
+        <tbody id="fills"></tbody></table>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Settlements</h2>
+      <table><thead><tr><th>market</th><th>side</th><th>outcome</th><th>P&amp;L</th></tr></thead>
+        <tbody id="settlements"></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>Live signals (scan)</h2>
+      <table><thead><tr><th>market</th><th>mine</th><th>mkt</th><th>edge</th>
+        <th>side</th><th>trade?</th></tr></thead>
+        <tbody id="signals"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (n,d=2) => (n==null?'—':Number(n).toFixed(d));
+const sign = n => n>0?'pos':(n<0?'neg':'dim');
+const money = n => (n>0?'+':'') + fmt(n);
+
+function kpi(label,val,cls,sub){
+  return `<div class="card"><div class="label">${label}</div>
+    <div class="val ${cls||''}">${val}</div>
+    <div class="sub">${sub||''}</div></div>`;
+}
+
+function render(s){
+  $('now').textContent = s.now.replace('T',' ').replace('+00:00','Z');
+  $('tick').textContent = s.tick;
+  const a=s.account, ex=s.execution, c=s.counts;
+  const roi = ex.filled_notional>0 ? (ex.net_pnl/ex.filled_notional*100):0;
+  $('roi').textContent = `net ${money(ex.net_pnl)} · ROI ${fmt(roi,1)}% on ${fmt(ex.filled_notional)} deployed`;
+
+  $('kpis').innerHTML =
+    kpi('Equity','$'+fmt(a.equity), sign(a.equity-a.starting_cash),
+        'start $'+fmt(a.starting_cash)) +
+    kpi('Net P&L', money(a.net_pnl), sign(a.net_pnl), 'gross '+money(a.gross_pnl)) +
+    kpi('Unrealized', money(a.unrealized), sign(a.unrealized), c.open_positions+' open') +
+    kpi('Fees', '-$'+fmt(a.fees), 'dim', '') +
+    kpi('Unfilled', fmt(ex.unfilled_rate*100,1)+'%', ex.unfilled_rate>0.05?'neg':'dim',
+        ex.n_cancelled+' cancelled') +
+    kpi('Avg slippage', fmt(ex.avg_slippage_per_share,4), 'dim', 'per share') +
+    kpi('Fills', ex.n_filled+'', 'dim', ex.n_partial+' partial') +
+    kpi('Markets', c.active+'/'+c.markets, 'dim', c.resolved+' resolved');
+
+  // positions
+  $('nopos').textContent = c.open_positions+' open';
+  $('positions').innerHTML = s.open_positions.length ? s.open_positions.map(p=>
+    `<tr><td title="${p.question||''}">${p.market_id}</td>
+      <td><span class="pill ${p.side==='BUY_YES'?'yes':'no'}">${p.side.replace('BUY_','')}</span></td>
+      <td>${fmt(p.shares)}</td><td>${fmt(p.avg_price,3)}</td><td>${fmt(p.mark,3)}</td>
+      <td class="${sign(p.unrealized)}">${money(p.unrealized)}</td>
+      <td class="dim">${fmt(p.hours_to_settle,1)}</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="7">no open positions</td></tr>';
+
+  // fills
+  $('fills').innerHTML = s.recent_fills.length ? s.recent_fills.map(f=>
+    `<tr><td>${f.market_id}</td>
+      <td><span class="pill ${f.side==='BUY_YES'?'yes':'no'}">${f.side.replace('BUY_','')}</span></td>
+      <td class="${f.status==='FILLED'?'pos':(f.status==='CANCELLED'?'neg':'')}">${f.status}</td>
+      <td>$${fmt(f.size)}</td><td>${fmt(f.avg_price,3)}</td>
+      <td class="${f.slippage>0?'neg':'dim'}">${fmt(f.slippage,4)}</td>
+      <td class="dim">${fmt(f.latency_ms,0)}</td>
+      <td class="dim">${fmt(f.unfilled_rate*100,0)}%</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="8">no fills yet</td></tr>';
+
+  // settlements
+  $('settlements').innerHTML = s.recent_settlements.length ? s.recent_settlements.map(x=>
+    `<tr><td>${x.market_id}</td>
+      <td><span class="pill ${x.side==='BUY_YES'?'yes':'no'}">${x.side.replace('BUY_','')}</span></td>
+      <td class="${x.outcome?'pos':'dim'}">${x.outcome?'YES':'NO'}</td>
+      <td class="${sign(x.pnl)}">${money(x.pnl)}</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="4">no settlements yet</td></tr>';
+
+  // signals
+  $('signals').innerHTML = s.recent_signals.map(g=>
+    `<tr><td title="${g.question}">${g.market_id} <span class="dim">${g.city}</span></td>
+      <td>${fmt(g.my_prob,2)}</td><td>${fmt(g.market_prob,2)}</td>
+      <td class="${sign(g.edge)}">${money(g.edge)}</td>
+      <td>${g.side?`<span class="pill ${g.side==='BUY_YES'?'yes':'no'}">${g.side.replace('BUY_','')}</span>`:'<span class="dim">—</span>'}</td>
+      <td>${g.tradeable?'<span class="pill trade">TRADE</span>':'<span class="dim">no</span>'}</td></tr>`
+    ).join('') || '<tr><td class="empty" colspan="6">scanning…</td></tr>';
+
+  // sparkline
+  const ec=s.equity_curve;
+  if(ec && ec.length>1){
+    const min=Math.min(...ec), max=Math.max(...ec), rng=(max-min)||1;
+    const pts=ec.map((v,i)=>`${i/(ec.length-1)*600},${60-(v-min)/rng*56-2}`).join(' ');
+    const up=ec[ec.length-1]>=ec[0];
+    $('spark').innerHTML=`<polyline fill="none" stroke="${up?'#3fd07f':'#ff5d6c'}"
+      stroke-width="1.5" points="${pts}"/>`;
+  }
+}
+
+async function tick(){
+  try{ const r=await fetch('/api/state'); render(await r.json()); }
+  catch(e){ /* keep last frame */ }
+}
+tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>
