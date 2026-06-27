@@ -1,0 +1,9 @@
+{
+  "new york":     [40.78, -73.97, "America/New_York"],
+  "nyc":          [40.78, -73.97, "America/New_York"],
+  "chicago":      [41.88, -87.63, "America/Chicago"],
+  "los angeles":  [34.05, -118.24, "America/Los_Angeles"],
+  "miami":        [25.76, -80.19, "America/New_York"],
+  "denver":       [39.74, -104.99, "America/Denver"],
+  "london":       [51.51, -0.13, "Europe/London"]
+}

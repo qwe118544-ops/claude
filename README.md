@@ -136,6 +136,50 @@ and verify, rung by rung, each change justified by a better out-of-sample score:
 
 ---
 
+## The live engine (the operating core)
+
+The backtest answers "is there an edge?". The **live engine** (`weather_alpha.live`)
+is the thing that actually runs: each pass it pulls current Polymarket weather
+markets and prices, computes our probability from the **latest ensemble
+forecast**, and flags markets where the two diverge enough to trade.
+
+```bash
+python -m weather_alpha.live --cities examples/cities.json \
+    --min-edge 0.08 --min-liquidity 50 --max-hours 96 --log out/signals.jsonl
+```
+
+Each market becomes a `Signal`, tradeable only when **four conditions** hold at
+once (this filter is what keeps you off noise):
+
+1. **Edge** — `|my_prob − market_price| ≥ min_edge`
+2. **Liquidity** — enough resting size at the price you'd actually take
+3. **Timing** — settlement within a sensible window (not so far out the
+   forecast hasn't converged; not already settling)
+4. **Confidence** — the contract parsed confidently to (city, threshold, date)
+
+Side selection: `my_prob` above the market → **BUY YES**; below → **BUY NO**.
+Taker price comes from the order book (best ask / `1 − best bid`), not the mid.
+
+**Why log every signal:** historical weather markets are too few for a strong
+backtest, so the engine instead appends every evaluation to a JSONL track
+record — `(timestamp, market, my_prob, market_price, edge, side, settle_date)`.
+Once a market settles you fill in the outcome and measure **live Brier skill
+vs the market** — the honest, forward-looking replacement for a thin backtest.
+
+**Not included on purpose:** order placement, wallet/signing, and
+correlation-aware position sizing. Execution touches real money and private
+keys and is the most dangerous part — build it only after the logged signals
+show a real live edge. The scanner deliberately stops at "here is the trade I
+*would* make, and why."
+
+> Verifiability: the live HTTP shapes (Open-Meteo ensemble, Polymarket Gamma +
+> CLOB) could not be exercised in this repo's build environment because egress
+> policy blocks those hosts. The **decision logic** — forecast→probability,
+> edge, the four filters, side/taker-price selection, and the scanner with its
+> logging — is fully unit-tested offline via injected fakes
+> (`tests/test_live_signal.py`). Confirm the JSON field mappings in
+> `live/polymarket.py` and `live/forecast.py` on the first networked run.
+
 ## Honest caveats — read before trusting any number
 
 * **Settlement source ≠ ERA5.** Real contracts settle on a specific official
@@ -162,7 +206,18 @@ weather_alpha/
   model.py        EmosThresholdModel (calibration) + ClimatologyBaseline
   evaluation.py   Brier, log loss, BSS, reliability table/diagram
   backtest.py     no-lookahead chronological train/test orchestration + verdict
-  cli.py          command-line entry point
-tests/test_framework.py   correctness checks (no network, no pytest needed)
-examples/run_demo.sh
+  cli.py          backtest command-line entry point
+  live/           the operating core (live edge detection)
+    markets.py      WeatherMarket model + best-effort question parser
+    forecast.py     live ensemble -> P(max >= threshold) (member counting)
+    signal.py       edge + four-condition filter + side/taker-price (pure logic)
+    polymarket.py   live Gamma + CLOB client (verify field shapes on first run)
+    scanner.py      one live pass + JSONL track-record logging
+    cli.py          `python -m weather_alpha.live`
+tests/
+  test_framework.py    backtest correctness (no network, no pytest)
+  test_live_signal.py  live decision-logic correctness (no network, no pytest)
+examples/
+  run_demo.sh
+  cities.json
 ```
