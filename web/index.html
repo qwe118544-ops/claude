@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>polyweather</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>polyweather</h1>
+  <nav id="tabs"></nav>
+  <div id="conn" class="conn">●</div>
+</header>
+
+<main id="panel">
+  <section class="row" id="statusRow">
+    <div class="card" id="dayCard"></div>
+    <div class="card" id="marketCard"></div>
+    <div class="card" id="signalCard"></div>
+  </section>
+  <section class="row">
+    <div class="card wide"><div id="pmfChart" class="chart"></div></div>
+  </section>
+  <section class="row">
+    <div class="card wide"><div id="trajChart" class="chart tall"></div></div>
+  </section>
+  <section class="row">
+    <div class="card half">
+      <h3>Explain feed</h3>
+      <ul id="explainFeed" class="feed"></ul>
+    </div>
+    <div class="card half">
+      <h3>Signal events</h3>
+      <ul id="signalFeed" class="feed"></ul>
+    </div>
+  </section>
+  <section class="row">
+    <div class="card wide">
+      <h3>Source health</h3>
+      <div id="healthBar" class="health"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

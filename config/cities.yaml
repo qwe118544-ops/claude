@@ -1,0 +1,130 @@
+# PolyWeather city configuration.
+# Every station reference here is either an ICAO code (METAR), a KNMI 10-min
+# station code, or an AMeDAS station *name in kanji* (resolved to a numeric ID
+# at runtime from amedastable.json so we never hard-code a wrong ID).
+# Run `polyweather doctor` after deployment: it validates every entry against
+# the live source and reports mismatches.
+
+grid:
+  t_min: -15.0
+  t_max: 50.0
+  step: 0.1
+
+cities:
+  london:
+    name: London
+    market_city_slug: london          # highest-temperature-in-{slug}-on-...
+    tz: Europe/London
+    lat: 51.505
+    lon: 0.0553
+    elevation_m: 5
+    resolution_station:
+      kind: metar
+      icao: EGLC
+      cadence_min: 30                 # METAR only; no faster public feed
+      # EGLC closes overnight & Sat afternoon->Sun noon: METARs stop. The
+      # settlement (Wunderground daily table) only sees published METARs.
+      operating_hours_local: ["06:00", "22:30"]
+      sampling_deficit_c: 0.15        # continuous max vs max of half-hourly integer obs
+    fast_sources: []                  # none available for EGLC (v1)
+    upstream:                         # estuary-breeze sentinels, east of station
+      - {kind: metar, id: EGMC, name: Southend,  travel_min: 60, weight: 1.0}
+      - {kind: metar, id: EGLL, name: Heathrow,  travel_min: -30, weight: 0.4}  # western reference; negative=behind
+    breeze:
+      onshore_sector: [40, 160]       # wind FROM ENE..SSE = Thames-estuary flow
+      post_front_rise_c: 0.6
+    peak_window:
+      summer: ["13:00", "16:30"]      # BST
+      winter: ["11:30", "14:30"]
+    openmeteo_models: [ecmwf_ifs025, ukmo_uk_deterministic_2km, icon_eu, knmi_harmonie_arome_europe, meteofrance_arome_france_hd, gfs_seamless]
+
+  amsterdam:
+    name: Amsterdam
+    market_city_slug: amsterdam
+    tz: Europe/Amsterdam
+    lat: 52.3105
+    lon: 4.7683
+    elevation_m: -3
+    resolution_station:
+      kind: metar
+      icao: EHAM
+      cadence_min: 30
+      operating_hours_local: ["00:00", "24:00"]
+      sampling_deficit_c: 0.15
+    fast_sources:
+      - kind: knmi
+        station_code: "06240"         # Schiphol; doctor verifies presence in file
+        cadence_min: 10
+    upstream:                         # North Sea breeze sentinels, W/NW coast
+      - {kind: knmi, id: "06225", name: IJmuiden,     travel_min: 75, weight: 1.0}
+      - {kind: knmi, id: "06257", name: Wijk aan Zee, travel_min: 70, weight: 0.9}
+      - {kind: knmi, id: "06235", name: De Kooy,      travel_min: 110, weight: 0.5}
+      - {kind: knmi, id: "06215", name: Voorschoten,  travel_min: 55, weight: 0.7}
+    breeze:
+      onshore_sector: [250, 360]      # wind FROM W..N = sea breeze at Schiphol
+      post_front_rise_c: 0.5
+    peak_window:
+      summer: ["13:00", "17:00"]      # CEST
+      winter: ["12:30", "15:00"]
+    openmeteo_models: [ecmwf_ifs025, knmi_harmonie_arome_europe, icon_eu, meteofrance_arome_france_hd, ukmo_global_deterministic_10km, gfs_seamless]
+
+  tokyo:
+    name: Tokyo
+    market_city_slug: tokyo
+    tz: Asia/Tokyo
+    lat: 35.5533
+    lon: 139.7811
+    elevation_m: 6
+    resolution_station:
+      kind: metar
+      icao: RJTT
+      cadence_min: 30
+      operating_hours_local: ["00:00", "24:00"]
+      sampling_deficit_c: 0.1
+    fast_sources:
+      - kind: amedas
+        station_name: "羽田"          # resolved to numeric ID from amedastable.json
+        cadence_min: 10
+    upstream:                         # Tokyo-Bay sea-breeze sentinels
+      - {kind: amedas, id: "江戸川臨海", name: Edogawa-rinkai, travel_min: 30, weight: 1.0}
+      - {kind: amedas, id: "千葉",      name: Chiba,           travel_min: 50, weight: 0.7}
+      - {kind: amedas, id: "横浜",      name: Yokohama,        travel_min: 35, weight: 0.8}
+    breeze:
+      onshore_sector: [120, 220]      # wind FROM SE..SSW = bay breeze at Haneda
+      post_front_rise_c: 0.4
+    peak_window:
+      summer: ["11:30", "14:30"]      # JST; sea-breeze days peak 12:30-13:30
+      winter: ["12:00", "14:30"]
+    openmeteo_models: [ecmwf_ifs025, jma_msm, icon_seamless, gfs_seamless]
+
+# Southern-hemisphere-free system: summer = Apr..Sep for all three cities.
+seasons:
+  summer_months: [4, 5, 6, 7, 8, 9]
+
+engine:
+  # sigma (°C) of a single model's remaining-day max error, by hours left in
+  # the warming window; interpolated. Replaced per-city/per-model once
+  # `polyweather backfill model-stats` has run.
+  default_sigma_by_hours_left: {12: 1.4, 8: 1.2, 6: 1.0, 4: 0.8, 2: 0.55, 1: 0.4, 0: 0.3}
+  default_model_bias_c: 0.0
+  analog_weight_peak: 0.35            # weight of kNN-analog dist in PEAK phase
+  analog_weight_other: 0.20
+  analog_k: 60
+  momentum_gain: 0.6                  # °C shift per °C of consistent run-to-run revision
+  residual_gain: 0.5
+  residual_widen_gain: 0.6
+  ceiling_margin_c: 0.5
+  breeze_eta_horizon_min: 90          # front with ETA inside this horizon caps the dist
+
+scheduler:
+  # polling cadence (seconds) by day phase
+  cadence:
+    NIGHT:    {metar: 1200, fast: 600,  models: 3600, market: 1800}
+    MORNING:  {metar: 300,  fast: 180,  models: 3600, market: 600}
+    PEAK:     {metar: 120,  fast: 90,   models: 1800, market: 240}
+    LOCKIN:   {metar: 300,  fast: 180,  models: 3600, market: 600}
+    SETTLED:  {metar: 1800, fast: 1200, models: 7200, market: 3600}
+
+polymarket:
+  gamma_base: "https://gamma-api.polymarket.com"
+  top_n: 2
